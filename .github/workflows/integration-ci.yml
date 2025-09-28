@@ -1,4 +1,4 @@
-name: Integration tests (manual)
+name: Integration tests (CI)
 
 on:
   workflow_dispatch: {}
@@ -17,6 +17,7 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd="pg_isready -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }}" --health-interval=5s --health-timeout=3s --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,61 +26,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system deps (Chromium)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-          sudo ln -sf /usr/lib/chromium-browser/chromedriver /usr/local/bin/chromedriver || true
-        shell: bash
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
-          # Make repo importable in the environment
           python -m pip install -e . || true
-          # ensure pytest is available (requirements.txt may not list it)
           python -m pip install pytest -q
 
       - name: Start API server
         run: |
-          # Point application to the service container 'postgres' provided by Actions
-          export DATABASE_URL="postgresql+psycopg2://camfit_user:mr001125!@db:5432/camfitdb"
-
-          # Ensure repo root is on PYTHONPATH so top-level imports like `import models` work
           export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
-
+          export DATABASE_URL="postgresql+psycopg2://${{ secrets.PG_USER }}:${{ secrets.PG_PASSWORD }}@db:5432/${{ secrets.PG_DB }}"
           echo "PYTHONPATH=$PYTHONPATH"
-
-          # Quick import sanity check to show import errors early
-          echo "--- import sanity check ---"
-          echo "PWD:"; pwd
-          echo "List GITHUB_WORKSPACE:"; ls -la "$GITHUB_WORKSPACE" || true
-          echo "List current directory:"; ls -la . || true
-          python - <<'PY'
-import sys, os
-print('sys.path:', sys.path)
-print('cwd:', os.getcwd())
-try:
-    print('workspace listing:', os.listdir(os.getenv('GITHUB_WORKSPACE', '.')))
-except Exception as e:
-    print('workspace listing error:', e)
-import importlib
-importlib.invalidate_caches()
-try:
-    import api
-    import models
-    print('import check OK')
-except Exception as e:
-    print('import check FAILED:', repr(e))
-import importlib.util
-print('find_spec(models):', importlib.util.find_spec('models'))
-PY
-
-          # Start the FastAPI app (uvicorn) in background so integration scripts can talk to it
+          echo "DATABASE_URL=$DATABASE_URL"
           nohup python -m uvicorn api:app --host 0.0.0.0 --port 8000 --log-level info > uvicorn.log 2>&1 &
-
-          # Wait for the server to be reachable (timeout ~30s)
           for i in $(seq 1 30); do
             if curl -sS http://127.0.0.1:8000/docs >/dev/null 2>&1; then
               echo "api reachable"
@@ -87,31 +47,14 @@ PY
             fi
             sleep 1
           done
+          tail -n 200 uvicorn.log || true
 
-          echo "---- uvicorn.log (tail -n 200) ----"
-          if [ -f uvicorn.log ]; then
-            tail -n 200 uvicorn.log || true
-          else
-            echo "(no uvicorn.log found)"
-          fi
-
-          echo "---- process list for python/uvicorn ----"
-          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' || true
-
-          echo "---- listening TCP ports (ss -ltnp) ----"
-          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true
-        shell: bash
-
-      - name: Run integration tests
+      - name: Run integration scripts
         env:
           NAS_FOLDER: ${{ github.workspace }}
           CHROME_BIN: /usr/bin/chromium-browser
         run: |
-          # Limit pytest collection to the tests/ directory to avoid collecting
-          # same-named modules located elsewhere in the repo (which causes
-          # 'import file mismatch' errors in CI).
           if [ -d tests ]; then
-            # If there are integration_test_*.py scripts, run them directly
             scripts=$(ls tests/integration_test_*.py 2>/dev/null || true)
             if [ -n "$scripts" ]; then
               for s in $scripts; do
@@ -119,11 +62,9 @@ PY
                 python "$s"
               done
             else
-              # Fallback: run any tests in tests/ that match the 'integration' keyword
               python -m pytest tests/ -q -k integration
             fi
           else
-            # Fallback to previous behaviour if no tests/ directory exists
             python -m pytest -q -k integration
           fi
 
@@ -142,7 +83,6 @@ PY
           else
             echo "(no uvicorn.log found)" >> server-diagnostics.txt
           fi
-        shell: bash
 
       - name: Upload server diagnostics
         if: always()

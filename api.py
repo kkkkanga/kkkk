@@ -487,7 +487,16 @@ def get_daily_sheet(date: str = Query(...), db: Session = Depends(get_db)):
 
 @app.get("/api/daily-sheet/meta")
 def get_daily_sheet_meta(date: str = Query(...), db: Session = Depends(get_db)):
-    sheet = db.get(DailySheet, date)
+    # Normalize incoming date string to a datetime.date so SQLAlchemy Date PK lookup works
+    try:
+        from datetime import date as _date
+        if isinstance(date, str):
+            date_obj = _date.fromisoformat(date)
+        else:
+            date_obj = date
+    except Exception:
+        raise HTTPException(status_code=400, detail="date 형식 오류, YYYY-MM-DD 필요")
+    sheet = db.get(DailySheet, date_obj)
     if not sheet:
         raise HTTPException(status_code=404, detail="파일 없음")
     return {
