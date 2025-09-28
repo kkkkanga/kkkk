@@ -36,26 +36,26 @@ jobs:
           echo "PYTHONPATH=$PYTHONPATH"
 
           # Quick import sanity check to show import errors early
-      echo "--- import sanity check ---"
-      echo "PWD:"; pwd
-      echo "List GITHUB_WORKSPACE:"; ls -la "$GITHUB_WORKSPACE" || true
-      echo "List current directory:"; ls -la . || true
-      python - <<'PY'
+          echo "--- import sanity check ---"
+          echo "PWD:"; pwd
+          echo "List GITHUB_WORKSPACE:"; ls -la "$GITHUB_WORKSPACE" || true
+          echo "List current directory:"; ls -la . || true
+          python - <<'PY'
 import sys, os
 print('sys.path:', sys.path)
 print('cwd:', os.getcwd())
 try:
-  print('workspace listing:', os.listdir(os.getenv('GITHUB_WORKSPACE', '.')))
+    print('workspace listing:', os.listdir(os.getenv('GITHUB_WORKSPACE', '.')))
 except Exception as e:
-  print('workspace listing error:', e)
+    print('workspace listing error:', e)
 import importlib
 importlib.invalidate_caches()
 try:
-  import api
-  import models
-  print('import check OK')
+    import api
+    import models
+    print('import check OK')
 except Exception as e:
-  print('import check FAILED:', repr(e))
+    print('import check FAILED:', repr(e))
 PY
 
           # Start the FastAPI app (uvicorn) in background so integration scripts can talk to it
