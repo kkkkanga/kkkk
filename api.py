@@ -12,7 +12,22 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi.middleware.cors import CORSMiddleware
-from models import DailySheetUpdatePayload
+try:
+    from models import DailySheetUpdatePayload
+except Exception:
+    # Fallback: load models.py by file path in case PYTHONPATH or module search
+    # doesn't find top-level modules in some CI environments.
+    import importlib.util
+    from pathlib import Path
+    models_path = Path(__file__).parent / "models.py"
+    if models_path.exists():
+        spec = importlib.util.spec_from_file_location("models", str(models_path))
+        models = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(models)
+        DailySheetUpdatePayload = getattr(models, 'DailySheetUpdatePayload')
+    else:
+        # re-raise original error for visibility
+        raise
 from fastapi import FastAPI, Request, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
