@@ -33,4 +33,12 @@ jobs:
           NAS_FOLDER: ${{ github.workspace }}
           CHROME_BIN: /usr/bin/chromium-browser
         run: |
-          python -m pytest -q -k integration
+          # Limit pytest collection to the tests/ directory to avoid collecting
+          # same-named modules located elsewhere in the repo (which causes
+          # 'import file mismatch' errors in CI).
+          if [ -d tests ]; then
+            python -m pytest tests/ -q -k integration
+          else
+            # Fallback to previous behaviour if no tests/ directory exists
+            python -m pytest -q -k integration
+          fi
