@@ -37,7 +37,17 @@ jobs:
           # same-named modules located elsewhere in the repo (which causes
           # 'import file mismatch' errors in CI).
           if [ -d tests ]; then
-            python -m pytest tests/ -q -k integration
+            # If there are integration_test_*.py scripts, run them directly
+            scripts=$(ls tests/integration_test_*.py 2>/dev/null || true)
+            if [ -n "$scripts" ]; then
+              for s in $scripts; do
+                echo "--- Running integration script: $s ---"
+                python "$s"
+              done
+            else
+              # Fallback: run any tests in tests/ that match the 'integration' keyword
+              python -m pytest tests/ -q -k integration
+            fi
           else
             # Fallback to previous behaviour if no tests/ directory exists
             python -m pytest -q -k integration
