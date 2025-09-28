@@ -30,8 +30,18 @@ jobs:
 
       - name: Start API server
         run: |
+          # Ensure repo root is on PYTHONPATH so top-level imports like `import models` work
+          export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
+
+          echo "PYTHONPATH=$PYTHONPATH"
+
+          # Quick import sanity check to show import errors early
+          echo "--- import sanity check ---"
+          python -c "import sys; print('sys.path:', sys.path); import importlib; importlib.invalidate_caches(); import api; import models; print('import check OK')" || true
+
           # Start the FastAPI app (uvicorn) in background so integration scripts can talk to it
           nohup python -m uvicorn api:app --host 127.0.0.1 --port 8000 --log-level info > uvicorn.log 2>&1 &
+
           # Wait for the server to be reachable (timeout ~30s)
           for i in $(seq 1 30); do
             if curl -sS http://127.0.0.1:8000/docs >/dev/null 2>&1; then
@@ -40,14 +50,17 @@ jobs:
             fi
             sleep 1
           done
+
           echo "---- uvicorn.log (tail -n 200) ----"
           if [ -f uvicorn.log ]; then
             tail -n 200 uvicorn.log || true
           else
             echo "(no uvicorn.log found)"
           fi
+
           echo "---- process list for python/uvicorn ----"
           ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' || true
+
           echo "---- listening TCP ports (ss -ltnp) ----"
           ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true
         shell: bash
