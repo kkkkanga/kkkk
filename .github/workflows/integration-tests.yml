@@ -76,3 +76,27 @@ jobs:
             # Fallback to previous behaviour if no tests/ directory exists
             python -m pytest -q -k integration
           fi
+
+      - name: Collect server diagnostics
+        if: always()
+        run: |
+          echo "---- process list for python/uvicorn ----" > server-diagnostics.txt
+          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' >> server-diagnostics.txt || true
+          echo "---- listening TCP ports (ss -ltnp / netstat) ----" >> server-diagnostics.txt
+          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true >> server-diagnostics.txt
+          echo "---- uvicorn.log (if present) ----" >> server-diagnostics.txt
+          if [ -f uvicorn.log ]; then
+            echo "(start of uvicorn.log)" >> server-diagnostics.txt
+            tail -n 1000 uvicorn.log >> server-diagnostics.txt || true
+            echo "(end of uvicorn.log)" >> server-diagnostics.txt
+          else
+            echo "(no uvicorn.log found)" >> server-diagnostics.txt
+          fi
+        shell: bash
+
+      - name: Upload server diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-diagnostics
+          path: server-diagnostics.txt
