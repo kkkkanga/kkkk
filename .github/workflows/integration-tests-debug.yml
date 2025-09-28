@@ -1,0 +1,120 @@
+name: Integration tests (debug push)
+
+on:
+  push:
+    branches:
+      - ci/start-api-in-tests
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps (Chromium)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo ln -sf /usr/lib/chromium-browser/chromedriver /usr/local/bin/chromedriver || true
+        shell: bash
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install pytest -q
+
+      - name: Start API server
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
+          echo "PYTHONPATH=$PYTHONPATH"
+          echo "--- import sanity check ---"
+          cd "$GITHUB_WORKSPACE" || true
+          echo "PWD:"; pwd
+          echo "List GITHUB_WORKSPACE:"; ls -la "$GITHUB_WORKSPACE" || true
+          echo "List current directory:"; ls -la . || true
+          python - <<'PY'
+import sys, os, importlib, importlib.util
+print('sys.path:', sys.path)
+print('cwd:', os.getcwd())
+try:
+    print('workspace listing:', os.listdir(os.getenv('GITHUB_WORKSPACE', '.')))
+except Exception as e:
+    print('workspace listing error:', e)
+importlib.invalidate_caches()
+try:
+    import api
+    import models
+    print('import check OK')
+except Exception as e:
+    print('import check FAILED:', repr(e))
+print('find_spec(models):', importlib.util.find_spec('models'))
+PY
+
+          nohup python -m uvicorn api:app --host 127.0.0.1 --port 8000 --log-level info > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sS http://127.0.0.1:8000/docs >/dev/null 2>&1; then
+              echo "api reachable"
+              break
+            fi
+            sleep 1
+          done
+          echo "---- uvicorn.log (tail -n 200) ----"
+          if [ -f uvicorn.log ]; then
+            tail -n 200 uvicorn.log || true
+          else
+            echo "(no uvicorn.log found)"
+          fi
+          echo "---- process list for python/uvicorn ----"
+          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' || true
+          echo "---- listening TCP ports (ss -ltnp) ----"
+          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true
+        shell: bash
+
+      - name: Run integration tests
+        env:
+          NAS_FOLDER: ${{ github.workspace }}
+          CHROME_BIN: /usr/bin/chromium-browser
+        run: |
+          if [ -d tests ]; then
+            scripts=$(ls tests/integration_test_*.py 2>/dev/null || true)
+            if [ -n "$scripts" ]; then
+              for s in $scripts; do
+                echo "--- Running integration script: $s ---"
+                python "$s"
+              done
+            else
+              python -m pytest tests/ -q -k integration
+            fi
+          else
+            python -m pytest -q -k integration
+          fi
+
+      - name: Collect server diagnostics
+        if: always()
+        run: |
+          echo "---- process list for python/uvicorn ----" > server-diagnostics.txt
+          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' >> server-diagnostics.txt || true
+          echo "---- listening TCP ports (ss -ltnp / netstat) ----" >> server-diagnostics.txt
+          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true >> server-diagnostics.txt
+          echo "---- uvicorn.log (if present) ----" >> server-diagnostics.txt
+          if [ -f uvicorn.log ]; then
+            echo "(start of uvicorn.log)" >> server-diagnostics.txt
+            tail -n 1000 uvicorn.log >> server-diagnostics.txt || true
+            echo "(end of uvicorn.log)" >> server-diagnostics.txt
+          else
+            echo "(no uvicorn.log found)" >> server-diagnostics.txt
+          fi
+        shell: bash
+
+      - name: Upload server diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-diagnostics
+          path: server-diagnostics.txt
