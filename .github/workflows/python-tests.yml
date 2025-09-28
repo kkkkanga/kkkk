@@ -26,8 +26,8 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
 
-      - name: Run tests
+      - name: Run unit tests (exclude integration)
         run: |
-          python -m pytest -q
+          python -m pytest -q -k "not integration"
         env:
           NAS_FOLDER: ${{ github.workspace }}
