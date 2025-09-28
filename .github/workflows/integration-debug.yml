@@ -1,0 +1,69 @@
+name: Integration debug (temporary)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ "ci/start-api-in-tests" ]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ secrets.PG_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.PG_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }}" --health-interval=5s --health-timeout=3s --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show basic info
+        run: |
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          echo "PYTHON: $(python --version 2>&1 || true)"
+          echo "Listing workspace files:"
+          ls -la || true
+          echo "Env snippet:"; env | grep -E 'PYTHONPATH|DATABASE_URL|GITHUB' || true
+
+      - name: Try to start uvicorn (dry-run)
+        run: |
+          set -euxo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
+          export DATABASE_URL="postgresql+psycopg2://${{ secrets.PG_USER }}:${{ secrets.PG_PASSWORD }}@127.0.0.1:5432/${{ secrets.PG_DB }}"
+          echo "DATABASE_URL=$DATABASE_URL"
+          python -c "import sys; print('sys.path sample:', sys.path[:5])" || true
+          # Try import models to see import errors
+          python - <<'PY'
+import importlib, sys
+try:
+    import models
+    print('import models OK')
+except Exception as e:
+    print('import models failed:', e)
+try:
+    import api
+    print('import api OK')
+except Exception as e:
+    print('import api failed:', e)
+PY
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          echo "---- server-diagnostics ----" > server-diagnostics.txt
+          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' >> server-diagnostics.txt || true
+          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true >> server-diagnostics.txt
+          echo "workspace top:" >> server-diagnostics.txt
+          ls -la | head -n 200 >> server-diagnostics.txt || true
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-diagnostics-debug
+          path: server-diagnostics.txt
