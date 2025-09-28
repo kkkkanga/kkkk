@@ -29,12 +29,38 @@ jobs:
           python -m pip freeze | sed -n '1,80p' > pip-freeze.txt || true
         shell: bash
 
-      - name: Collect import diagnostics
-        run: |
-          out=server-diagnostics.txt
-          echo "Collecting diagnostics to $out"
-          python - <<'PY' > "$out" 2>&1
-import sys, os, importlib, importlib.util
+    - name: Run uvicorn in foreground for immediate log output
+    run: |
+      echo "Starting uvicorn in foreground (will block until exit)"
+      export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
+      echo "PYTHONPATH=$PYTHONPATH"
+      # Run a quick import check before starting
+      python - <<'PY'
+import importlib, importlib.util, os, sys
+print('find_spec(models):', importlib.util.find_spec('models'))
+try:
+  import api
+  print('api import OK')
+except Exception as e:
+  print('api import FAILED:', repr(e))
+try:
+  import models
+  print('models import OK')
+except Exception as e:
+  print('models import FAILED:', repr(e))
+PY
+
+      # Start uvicorn in foreground so errors appear in job log
+      python -m uvicorn api:app --host 127.0.0.1 --port 8000 --log-level debug
+    shell: bash
+
+    - name: Collect import diagnostics (artifact)
+    if: always()
+    run: |
+      out=server-diagnostics.txt
+      echo "Collecting diagnostics to $out"
+      python - <<'PY' > "$out" 2>&1
+import sys, os, importlib
 print('timestamp:', __import__('datetime').datetime.utcnow().isoformat())
 print('cwd:', os.getcwd())
 print('GITHUB_WORKSPACE:', os.environ.get('GITHUB_WORKSPACE'))
@@ -44,35 +70,36 @@ print('\n--- top-level listing ---')
 print(os.listdir('.'))
 gw = os.environ.get('GITHUB_WORKSPACE') or '.'
 try:
-    print('\n--- GITHUB_WORKSPACE listing ---')
-    print(os.listdir(gw))
+  print('\n--- GITHUB_WORKSPACE listing ---')
+  print(os.listdir(gw))
 except Exception as e:
-    print('workspace listing error', e)
+  print('workspace listing error', e)
 print('\n--- find_spec(models) ---')
 print(importlib.util.find_spec('models'))
 print('\n--- try import api/models ---')
 try:
-    import api
-    print('api import OK')
+  import api
+  print('api import OK')
 except Exception as e:
-    print('api import FAILED:', repr(e))
+  print('api import FAILED:', repr(e))
 try:
-    import models
-    print('models import OK')
+  import models
+  print('models import OK')
 except Exception as e:
-    print('models import FAILED:', repr(e))
+  print('models import FAILED:', repr(e))
 print('\n--- pip freeze (first 60 lines if available) ---')
 try:
-    import subprocess
-    p = subprocess.run(['python','-m','pip','freeze'], capture_output=True, text=True)
-    print('\n'.join(p.stdout.splitlines()[:60]))
+  import subprocess
+  p = subprocess.run(['python','-m','pip','freeze'], capture_output=True, text=True)
+  print('\n'.join(p.stdout.splitlines()[:60]))
 except Exception as e:
-    print('pip freeze error', e)
+  print('pip freeze error', e)
 PY
-        shell: bash
+    shell: bash
 
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-diagnostics
-          path: server-diagnostics.txt
+    - name: Upload diagnostics
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: server-diagnostics
+      path: server-diagnostics.txt
