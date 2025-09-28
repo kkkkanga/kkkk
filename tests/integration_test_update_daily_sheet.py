@@ -1,9 +1,11 @@
 import requests
 import json
 from pprint import pprint
+from pathlib import Path
 
 API_BASE = "http://127.0.0.1:8000"
-PAYLOAD_PATH = "sample_payload.json"
+# Resolve payload path relative to this script so CI/workdir doesn't matter
+PAYLOAD_PATH = Path(__file__).parent / "sample_payload.json"
 
 def main():
     with open(PAYLOAD_PATH, encoding='utf-8') as f:
