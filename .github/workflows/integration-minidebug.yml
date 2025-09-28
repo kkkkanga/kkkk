@@ -1,0 +1,78 @@
+name: Integration mini-debug (push)
+
+on:
+  push:
+    branches:
+      - ci/start-api-in-tests
+
+jobs:
+  mini-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps (if present)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+        shell: bash
+
+      - name: Try pip install -e .
+        run: |
+          echo "Attempting editable install"
+          python -m pip install -e . || true
+          python -m pip freeze | sed -n '1,80p' > pip-freeze.txt || true
+        shell: bash
+
+      - name: Collect import diagnostics
+        run: |
+          out=server-diagnostics.txt
+          echo "Collecting diagnostics to $out"
+          python - <<'PY' > "$out" 2>&1
+import sys, os, importlib, importlib.util
+print('timestamp:', __import__('datetime').datetime.utcnow().isoformat())
+print('cwd:', os.getcwd())
+print('GITHUB_WORKSPACE:', os.environ.get('GITHUB_WORKSPACE'))
+print('\n--- sys.path ---')
+print(sys.path)
+print('\n--- top-level listing ---')
+print(os.listdir('.'))
+gw = os.environ.get('GITHUB_WORKSPACE') or '.'
+try:
+    print('\n--- GITHUB_WORKSPACE listing ---')
+    print(os.listdir(gw))
+except Exception as e:
+    print('workspace listing error', e)
+print('\n--- find_spec(models) ---')
+print(importlib.util.find_spec('models'))
+print('\n--- try import api/models ---')
+try:
+    import api
+    print('api import OK')
+except Exception as e:
+    print('api import FAILED:', repr(e))
+try:
+    import models
+    print('models import OK')
+except Exception as e:
+    print('models import FAILED:', repr(e))
+print('\n--- pip freeze (first 60 lines if available) ---')
+try:
+    import subprocess
+    p = subprocess.run(['python','-m','pip','freeze'], capture_output=True, text=True)
+    print('\n'.join(p.stdout.splitlines()[:60]))
+except Exception as e:
+    print('pip freeze error', e)
+PY
+        shell: bash
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-diagnostics
+          path: server-diagnostics.txt
