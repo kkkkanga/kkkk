@@ -40,6 +40,16 @@ jobs:
             fi
             sleep 1
           done
+          echo "---- uvicorn.log (tail -n 200) ----"
+          if [ -f uvicorn.log ]; then
+            tail -n 200 uvicorn.log || true
+          else
+            echo "(no uvicorn.log found)"
+          fi
+          echo "---- process list for python/uvicorn ----"
+          ps aux | egrep 'uvicorn|python' | egrep -v 'egrep' || true
+          echo "---- listening TCP ports (ss -ltnp) ----"
+          ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true
         shell: bash
 
       - name: Run integration tests
