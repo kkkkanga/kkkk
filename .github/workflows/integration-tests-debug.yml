@@ -29,7 +29,13 @@ jobs:
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
           python -m pip install pytest -q
 
-      - name: Start API server
+      - name: Install repo as package (editable)
+        run: |
+          echo "Attempting to install repository as a package (editable) to ensure imports work"
+          python -m pip install -e . || true
+          echo "pip freeze (top 50 lines):"; python -m pip freeze | head -n 50 || true
+
+    - name: Start API server
         run: |
           export PYTHONPATH="$GITHUB_WORKSPACE:${PYTHONPATH}"
           echo "PYTHONPATH=$PYTHONPATH"
@@ -49,12 +55,14 @@ except Exception as e:
 importlib.invalidate_caches()
 try:
     import api
-    import models
-    print('import check OK')
+  import models
+  print('import check OK')
 except Exception as e:
     print('import check FAILED:', repr(e))
 print('find_spec(models):', importlib.util.find_spec('models'))
 PY
+
+      echo "Post-install import test:"; python -c "import importlib; importlib.invalidate_caches(); import api, models; print('post-install import ok')" || true
 
           nohup python -m uvicorn api:app --host 127.0.0.1 --port 8000 --log-level info > uvicorn.log 2>&1 &
           for i in $(seq 1 30); do
